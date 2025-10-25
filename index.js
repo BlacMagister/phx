@@ -7,100 +7,97 @@ const REF_CODE = 'P9WXSL';
 const PASSWORD = 'qwertyui';
 
 // ====== HELPER ======
-async function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
-async function exists(page, selector, timeout = 0) {
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+async function exists(pageOrPopup, selector, timeout = 0) {
   try {
-    if (timeout > 0) await page.waitForSelector(selector, { timeout });
-    return (await page.locator(selector).count()) > 0;
+    if (timeout > 0) await pageOrPopup.waitForSelector(selector, { timeout });
+    return (await pageOrPopup.locator(selector).count()) > 0;
   } catch { return false; }
 }
 
-// ====== PROSES 1 EMAIL (flow login tidak diubah, hanya dibuat aman) ======
+// ====== PROSES 1 EMAIL (flow login dipertahankan, dibuat aman & sabar) ======
 async function processEmailInBrowser(browser, email) {
   console.log(`\n=== Processing email: ${email} ===`);
   const context = await browser.newContext();
   const page = await context.newPage();
 
   try {
-    // Buka halaman
-    await page.goto(`https://app.piggycell.io/?ref=${REF_CODE}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    await page.waitForLoadState('networkidle', { timeout: 60000 });
-    await wait(2500);
+    // 1) Buka halaman
+    await page.goto(`https://app.piggycell.io/?ref=${REF_CODE}`, { waitUntil: 'domcontentloaded', timeout: 90000 });
+    await page.waitForLoadState('networkidle', { timeout: 90000 });
+    await wait(3000);
 
-    // Connect Wallet (aman: cek dulu)
-    if (!(await exists(page, 'button:has-text("Connect Wallet")', 40000))) {
+    // 2) Klik Connect Wallet (cek dulu)
+    if (!(await exists(page, 'button:has-text("Connect Wallet")', 60000))) {
       console.log('⚠️ Connect Wallet button not found');
       return false;
     }
-    await page.getByRole('button', { name: /connect wallet/i }).first().click({ timeout: 40000 });
-    await wait(1500);
+    await page.getByRole('button', { name: /connect wallet/i }).first().click({ timeout: 60000 });
+    await wait(2000);
 
-    // Continue with Google → popup
+    // 3) Klik Continue with Google → tunggu popup
     let googlePopup;
     try {
       [googlePopup] = await Promise.all([
-        page.waitForEvent('popup', { timeout: 60000 }),
-        page.getByRole('button', { name: /continue with google/i }).first().click({ timeout: 60000 })
+        page.waitForEvent('popup', { timeout: 90000 }),
+        page.getByRole('button', { name: /continue with google/i }).first().click({ timeout: 90000 })
       ]);
     } catch (e) {
-      console.log('⚠️ Failed opening Google popup:', e.message);
+      console.log('⚠️ Failed to open Google popup:', e.message);
       return false;
     }
 
-    // Pastikan popup siap
+    // 4) Pastikan popup siap
     if (googlePopup.isClosed()) return false;
-    await googlePopup.waitForLoadState('domcontentloaded', { timeout: 60000 }).catch(()=>{});
-    await wait(2000);
+    await googlePopup.waitForLoadState('domcontentloaded', { timeout: 90000 }).catch(()=>{});
+    await wait(2500);
 
-    // Isi email (hanya jika field ada; kalau langsung account picker, step ini dilewati)
-    if (!googlePopup.isClosed() && await exists(googlePopup, 'input[type="email"], input[name="identifier"]', 30000)) {
-      await googlePopup.fill('input[type="email"], input[name="identifier"]', email, { timeout: 40000 }).catch(()=>{});
-      await wait(1200);
-      if (!googlePopup.isClosed() && await exists(googlePopup, 'button:has-text("Next"), #identifierNext', 10000)) {
-        await googlePopup.click('button:has-text("Next"), #identifierNext', { timeout: 30000 }).catch(()=>{});
+    // 5) Isi email (bila ada field email; jika account picker langsung muncul, step ini dilewati)
+    if (!googlePopup.isClosed() && await exists(googlePopup, 'input[type="email"], input[name="identifier"]', 60000)) {
+      await googlePopup.fill('input[type="email"], input[name="identifier"]', email, { timeout: 90000 }).catch(()=>{});
+      await wait(1500);
+      if (!googlePopup.isClosed() && await exists(googlePopup, 'button:has-text("Next"), #identifierNext', 30000)) {
+        await googlePopup.click('button:has-text("Next"), #identifierNext', { timeout: 60000 }).catch(()=>{});
       }
     }
 
-    // Tunggu password field jika ada
-    if (!googlePopup.isClosed() && await exists(googlePopup, 'input[type="password"], input[name="password"]', 40000)) {
-      await googlePopup.fill('input[type="password"], input[name="password"]', PASSWORD, { timeout: 40000 }).catch(()=>{});
-      await wait(1200);
-      if (!googlePopup.isClosed() && await exists(googlePopup, 'button:has-text("Next"), #passwordNext', 10000)) {
-        await googlePopup.click('button:has-text("Next"), #passwordNext', { timeout: 30000 }).catch(()=>{});
+    // 6) Tunggu & isi password (bila diminta)
+    if (!googlePopup.isClosed() && await exists(googlePopup, 'input[type="password"], input[name="password"]', 90000)) {
+      await googlePopup.fill('input[type="password"], input[name="password"]', PASSWORD, { timeout: 90000 }).catch(()=>{});
+      await wait(1500);
+      if (!googlePopup.isClosed() && await exists(googlePopup, 'button:has-text("Next"), #passwordNext', 30000)) {
+        await googlePopup.click('button:has-text("Next"), #passwordNext', { timeout: 60000 }).catch(()=>{});
       }
     }
 
-    // Scroll + "Saya mengerti" (aman dari detachment)
+    // 7) Scroll ke bawah + klik "Saya mengerti" bila ada
     if (!googlePopup.isClosed()) {
       await googlePopup.evaluate(() => { try { window.scrollTo(0, document.body.scrollHeight); } catch(_){} }).catch(()=>{});
-      await wait(1000);
-      const sayaMengertiSelector = 'input[value="Saya mengerti"], button:has-text("Saya mengerti")';
+      await wait(1500);
+      const sayaMengertiSelector = 'input[value="Saya mengerti"], button:has-text("Saya mengerti"), text=Saya mengerti';
       if (!googlePopup.isClosed() && await exists(googlePopup, sayaMengertiSelector)) {
-        await googlePopup.click(sayaMengertiSelector, { timeout: 30000 }).catch(()=>{});
+        await googlePopup.click(sayaMengertiSelector, { timeout: 60000 }).catch(()=>{});
         console.log("✅ Klik 'Saya Mengerti'");
-        await wait(800);
+        await wait(1000);
       }
     }
 
-    // Continue (kalau ada)
-    if (!googlePopup.isClosed() && await exists(googlePopup, 'button:has-text("Continue")', 20000)) {
-      await googlePopup.click('button:has-text("Continue")', { timeout: 40000 }).catch(()=>{});
+    // 8) Klik Continue (kalau ada), lalu tunggu popup tertutup
+    if (!googlePopup.isClosed() && await exists(googlePopup, 'button:has-text("Continue")', 60000)) {
+      await googlePopup.click('button:has-text("Continue")', { timeout: 90000 }).catch(()=>{});
     }
-
-    // Tunggu popup menutup, lalu JANGAN sentuh lagi googlePopup
     if (!googlePopup.isClosed()) {
-      await googlePopup.waitForEvent('close', { timeout: 60000 }).catch(()=>{});
+      await googlePopup.waitForEvent('close', { timeout: 90000 }).catch(()=>{});
     }
 
-    // Kembali ke main page
-    await wait(3000);
-    await page.waitForLoadState('networkidle', { timeout: 60000 }).catch(()=>{});
-    await wait(1500);
+    // 9) Kembali ke main page, sabar tunggu
+    await wait(4000);
+    await page.waitForLoadState('networkidle', { timeout: 90000 }).catch(()=>{});
+    await wait(2000);
 
-    // Cek tombol Register sekali saja (sesuai opsi A: tanpa BACK/attempt-2)
-    const hasRegister = await exists(page, 'button:has-text("Register")', 8000);
-    if (hasRegister) {
-      await page.click('button:has-text("Register")', { timeout: 40000 }).catch(()=>{});
+    // 10) Cek tombol Register sekali saja (tanpa BACK/attempt 2)
+    if (await exists(page, 'button:has-text("Register")', 10000)) {
+      await page.click('button:has-text("Register")', { timeout: 90000 }).catch(()=>{});
       await wait(2000);
       console.log(`✅ SUCCESS: ${email}`);
       return true;
@@ -117,7 +114,7 @@ async function processEmailInBrowser(browser, email) {
   }
 }
 
-// Jalankan 1 email = 1 browser (anti-crash)
+// ====== Jalankan 1 email = 1 browser (ANTI-CRASH) ======
 async function runOneEmail(email) {
   let browser;
   try {
@@ -131,7 +128,7 @@ async function runOneEmail(email) {
   }
 }
 
-// Hapus satu kemunculan email dari file (rapi & FIFO)
+// ====== Utilities ======
 function removeEmailLine(filePath, target) {
   try {
     const lines = fs.readFileSync(filePath, 'utf8').split('\n');
@@ -145,7 +142,7 @@ function removeEmailLine(filePath, target) {
   }
 }
 
-// ====== MAIN: FIFO, retry 1x, log NORMAL ======
+// ====== MAIN: FIFO, Retry 1x, LOG NORMAL ======
 async function main() {
   const emailPath = path.join(__dirname, 'email.txt');
   const suksesPath = path.join(__dirname, 'sukses.txt');
@@ -168,7 +165,7 @@ async function main() {
 
     if (!ok) {
       console.log(`[${i + 1}/${total}] RETRY 1x: ${email}`);
-      await wait(10000);
+      await wait(10000); // jeda sebelum retry
       ok = await runOneEmail(email);
     }
 
@@ -179,9 +176,10 @@ async function main() {
     } else {
       console.log(`[${i + 1}/${total}] RESULT: FAILED  → ${email}`);
       fs.appendFileSync(gagalPath, email + '\n');
+      // (tidak hapus dari email.txt agar bisa kamu review/ulang manual)
     }
 
-    await wait(4000);
+    await wait(4000); // jeda antar email (tidak agresif)
   }
 
   console.log('\n🎉 ALL EMAILS FINISHED (ORDER PRESERVED)');
