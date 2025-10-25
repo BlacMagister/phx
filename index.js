@@ -2,39 +2,153 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
+// Random Delay (biar mirip manusia)
+async function humanWait(page, min = 2000, max = 5000) {
+	const delay = min + Math.random() * (max - min);
+	await page.waitForTimeout(delay);
+}
+
 // Function to process a single email
 async function processEmail(browser, email) {
 	console.log(`\n=== Processing email: ${email} ===`);
-	
-	// New context ensures a fresh profile (no cookies/cache/localStorage)
+
 	const context = await browser.newContext();
 	const page = await context.newPage();
 
 	try {
-		await page.goto('https://app.piggycell.io/?ref=LEBQ9I', { waitUntil: 'domcontentloaded' });
-		await page.waitForLoadState('networkidle');
+		await page.goto('https://app.piggycell.io/?ref=LEBQ9I', { waitUntil: 'domcontentloaded', timeout: 45000 });
+		await page.waitForLoadState('networkidle', { timeout: 45000 });
+		await humanWait(page);
 
-		// Click "Connect Wallet"
+		// Connect Wallet
 		const connectButton = page.getByRole('button', { name: /connect wallet/i });
-		await connectButton.first().click({ timeout: 10000 });
-		await page.waitForTimeout(500);
+		await connectButton.first().click({ timeout: 25000 });
+		await humanWait(page);
 
-		// Click "Continue with Google" and wait for popup
+		// Continue with Google
 		let googlePopup;
 		try {
 			[googlePopup] = await Promise.all([
-				page.waitForEvent('popup', { timeout: 10000 }),
-				page.getByRole('button', { name: /continue with google/i }).first().click({ timeout: 10000 })
+				page.waitForEvent('popup', { timeout: 30000 }),
+				page.getByRole('button', { name: /continue with google/i }).first().click({ timeout: 30000 })
 			]);
 		} catch (e) {
-			// Check if "Too many requests" error appeared on main page
-			const mainPageContent = await page.textContent('body').catch(() => null);
 			const currentUrl = page.url();
-			
+			const mainPageContent = await page.textContent('body').catch(() => null);
+
 			if (currentUrl.includes('auth.web3auth.io') && mainPageContent && mainPageContent.includes('Too many requests')) {
-				console.log(`⚠️ Too many requests detected for ${email}. Waiting 5 minutes before retry...`);
+				console.log(`⚠️ Too many requests for ${email}. Retry after 5 mins.`);
 				return 'retry';
 			}
+
+			throw e;
+		}
+
+		await googlePopup.waitForLoadState('domcontentloaded', { timeout: 35000 });
+		await humanWait(googlePopup);
+
+		// Too many request check
+		const popupContent = await googlePopup.textContent('body').catch(() => null);
+		const popupUrl = googlePopup.url();
+		if (popupUrl.includes('auth.web3auth.io') && popupContent && popupContent.includes('Too many requests')) {
+			console.log(`⚠️ Too many requests popup. Retry later.`);
+			await googlePopup.close().catch(() => {});
+			return 'retry';
+		}
+
+		// Fill Email
+		await googlePopup.fill('input[type="email"], input[name="identifier"]', email, { timeout: 30000 });
+		await humanWait(googlePopup);
+		await googlePopup.click('button:has-text("Next"), #identifierNext', { timeout: 30000 });
+
+		// Wait Password Page
+		await googlePopup.waitForSelector('input[type="password"], input[name="password"]', { timeout: 35000 });
+		await humanWait(googlePopup);
+
+		// Fill Password
+		await googlePopup.fill('input[type="password"], input[name="password"]', 'qwertyui', { timeout: 35000 });
+		await humanWait(googlePopup);
+		await googlePopup.click('button:has-text("Next"), #passwordNext', { timeout: 35000 });
+
+		// Privacy + Continue
+		await humanWait(googlePopup);
+		await googlePopup.evaluate(() => { window.scrollTo(0, document.body.scrollHeight); });
+		await googlePopup.waitForTimeout(1000);
+		await googlePopup.click('button:has-text("Continue")', { timeout: 35000 }).catch(() => {});
+		await googlePopup.waitForEvent('close', { timeout: 35000 });
+
+		// After Login
+		console.log('⏳ Checking register button...');
+		await page.waitForTimeout(4000);
+		await page.waitForLoadState('networkidle', { timeout: 35000 });
+
+		let hasRegisterButton = await page.locator('button:has-text("Register")').isVisible().catch(() => false);
+		if (hasRegisterButton) {
+			await page.click('button:has-text("Register")', { timeout: 35000 });
+			await humanWait(page);
+			console.log(`✅ SUCCESS: ${email}`);
+			return true;
+		}
+
+		console.log(`❌ FAILED: ${email} no register button`);
+		return false;
+
+	} catch (error) {
+		console.log(`❌ ERROR: ${email} - ${error.message}`);
+		return false;
+	} finally {
+		await context.close();
+	}
+}
+
+// Main
+async function main() {
+	const browser = await chromium.launch({ headless: false });
+
+	try {
+		const emailPath = path.join(__dirname, 'email.txt');
+		const suksesPath = path.join(__dirname, 'sukses.txt');
+
+		if (!fs.existsSync(emailPath)) {
+			console.log('email.txt not found!');
+			return;
+		}
+
+		let emails = fs.readFileSync(emailPath, 'utf8').trim().split('\n').filter(email => email.trim());
+		console.log(`Found ${emails.length} emails`);
+
+		for (let i = 0; i < emails.length; i++) {
+			const email = emails[i];
+			console.log(`\n[${i + 1}/${emails.length}] ${email}`);
+
+			const result = await processEmail(browser, email);
+
+			if (result === 'retry') {
+				console.log(`⏳ Waiting 5 mins because too many requests...`);
+				await new Promise(resolve => setTimeout(resolve, 300000)); // 5 mins
+				i--;
+				continue;
+			}
+
+			if (result === true) {
+				fs.appendFileSync(suksesPath, email + '\n');
+				emails = emails.filter(e => e !== email);
+				fs.writeFileSync(emailPath, emails.join('\n'));
+			}
+
+			await new Promise(resolve => setTimeout(resolve, 4000));
+		}
+
+		console.log('\n🎉 ALL DONE');
+
+	} catch (error) {
+		console.error('Error:', error);
+	} finally {
+		await browser.close();
+	}
+}
+
+main();			}
 			throw e;
 		}
 
