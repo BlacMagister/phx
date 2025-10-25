@@ -9,7 +9,7 @@ async function processEmail(browser, email) {
 	const page = await context.newPage();
 
 	try {
-		await page.goto('https://app.piggycell.io/?ref=LEBQ9I', { waitUntil: 'domcontentloaded', timeout: 60000 });
+		await page.goto('https://app.piggycell.io/?ref=P9WXSL', { waitUntil: 'domcontentloaded', timeout: 60000 });
 		await page.waitForLoadState('networkidle', { timeout: 60000 });
 		await page.waitForTimeout(3000);
 
